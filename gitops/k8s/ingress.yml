@@ -1,0 +1,38 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: boutique
+  namespace: boutique
+  annotations:
+    # Internet-facing ALB, routing to pod IPs (VPC CNI).
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    # Domainless: listen on plain HTTP only (no ACM cert / no HTTPS redirect).
+    # To add TLS later, register a domain, re-add the 443 listener + ssl-redirect,
+    # and put your domain back as a host rule so the ACM cert is auto-discovered.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    # Group multiple ingresses onto one ALB (optional but cost-efficient).
+    alb.ingress.kubernetes.io/group.name: boutique
+spec:
+  ingressClassName: alb
+  rules:
+    # No host rule: the ALB answers on its own AWS-generated hostname.
+    - http:
+        paths:
+          # More specific path first: API traffic to the gateway.
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: 3001
+          # Everything else to the frontend SPA.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 3000

@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-service
+  namespace: boutique
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: user-service
+  template:
+    metadata:
+      labels:
+        app: user-service
+    spec:
+      containers:
+        - name: user-service
+          image: 018442532737.dkr.ecr.ap-south-1.amazonaws.com/user-service:d62edf0dd4f9a8056cdf8ec065445782b59fa774
+          ports:
+            - containerPort: 3006
+          env:
+            - name: NODE_ENV
+              value: development
+            - name: PORT
+              value: "3006"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: boutique-secrets
+                  key: USERS_DB_URL
+
+--- 
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-service
+  namespace: boutique
+  labels:
+    app: user-service
+    monitored: "true"
+spec:
+  selector:
+    app: user-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3006
+      targetPort: 3006
+  type: ClusterIP

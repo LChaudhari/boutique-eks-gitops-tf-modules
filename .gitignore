@@ -1,0 +1,76 @@
+# =====================================================================
+#  Terraform  (Infrastructure/)
+# =====================================================================
+# Local .terraform working dirs (provider plugins, downloaded modules)
+**/.terraform/*
+
+# State files — state lives in the S3 backend, NEVER commit it
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash logs
+crash.log
+crash.*.log
+
+# Saved plan output (can contain sensitive values)
+*.tfplan
+*.plan
+
+# Local override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Terraform CLI config
+.terraformrc
+terraform.rc
+
+# NOTE: .terraform.lock.hcl is intentionally NOT ignored — commit it so
+# provider versions are pinned and reproducible across the team.
+
+# --- tfvars ---
+# Ignore tfvars by default (may hold secrets), then whitelist the committed
+# env configs. Paths are anchored to this repo root, so they include
+# Infrastructure/.
+*.tfvars
+*.tfvars.json
+!Infrastructure/stage/stage.tfvars
+!Infrastructure/prod/prod.tfvars
+
+# =====================================================================
+#  Node.js  (boutique-microservices/)
+# =====================================================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+
+# =====================================================================
+#  Secrets / environment
+# =====================================================================
+# Ignore real env files, keep the committed *.env.example templates
+.env
+.env.*
+!.env.example
+!*.env.example
+
+# Kubeconfig / credentials that may get dropped in the tree
+kubeconfig
+*.kubeconfig
+*.pem
+
+# =====================================================================
+#  OS / editor cruft
+# =====================================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

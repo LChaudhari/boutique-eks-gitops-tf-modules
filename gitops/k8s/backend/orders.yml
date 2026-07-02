@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+  namespace: boutique
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      containers:
+        - name: orders
+          image: 018442532737.dkr.ecr.ap-south-1.amazonaws.com/orders:d62edf0dd4f9a8056cdf8ec065445782b59fa774
+          ports:
+            - containerPort: 3005
+          env:
+            - name: NODE_ENV
+              value: development
+            - name: PORT
+              value: "3005"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: boutique-secrets
+                  key: ORDERS_DB_URL
+            - name: PRODUCTS_SERVICE_URL
+              value: "http://product-service:3003"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+  namespace: boutique
+  labels:
+    app: orders
+    monitored: "true"
+spec:
+  selector:
+    app: orders
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3005
+      targetPort: 3005
+  type: ClusterIP

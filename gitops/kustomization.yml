@@ -1,0 +1,53 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: boutique
+
+resources:
+  - namespace.yml
+  - secrets.yml
+  - k8s/database/statefulset.yml
+  - k8s/database/service.yml
+  - k8s/backend/gateway.yml
+  - k8s/backend/service-monitor.yml
+  - k8s/backend/auth.yml
+  - k8s/backend/product-service.yml
+  - k8s/backend/order-service.yml
+  - k8s/backend/orders.yml
+  - k8s/backend/user-service.yml
+  - k8s/frontend/deployment.yml
+  - k8s/ingress.yml
+  - k8s/grafana-dashboard.yml
+
+configMapGenerator:
+  - name: boutique-db-dump
+    files:
+      - k8s/database/boutique_full.sql
+
+  # ── Single source of truth for the ECR registry (account + region) ──
+  # Change THIS ONE LINE to repoint every app image; the replacement below
+  # rewrites the registry host of all Deployment images automatically.
+  - name: ecr-config
+    literals:
+      - registry=664418958448.dkr.ecr.us-west-2.amazonaws.com
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Overwrite the registry host (segment before the first "/") of every app
+# image with the value above. Targets Deployments only, so the Postgres
+# StatefulSet (public postgres:15-alpine) is left alone. The ":tag" part of
+# each image is preserved, so CI can keep bumping tags independently.
+replacements:
+  - source:
+      kind: ConfigMap
+      name: ecr-config
+      fieldPath: data.registry
+    targets:
+      - select:
+          kind: Deployment
+        fieldPaths:
+          - spec.template.spec.containers.0.image
+        options:
+          delimiter: '/'
+          index: 0
