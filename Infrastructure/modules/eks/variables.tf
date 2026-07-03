@@ -94,3 +94,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "hosted_zone_id" {
+  description = "Route53 hosted zone ID that ExternalDNS manages. When set, the ExternalDNS IAM policy is scoped to this zone; empty falls back to all zones (domainless mode, where ExternalDNS is not deployed)."
+  type        = string
+  default     = ""
+}

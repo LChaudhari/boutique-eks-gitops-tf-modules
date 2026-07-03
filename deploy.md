@@ -424,6 +424,34 @@ In Grafana → **Dashboards**, a pre-built dashboard for the services is already
 
 ---
 
+## Security Hardening (Infrastructure)
+
+**What:** Security items in the Terraform (`Infrastructure/`) that must be reviewed/updated
+before treating an environment as production.
+**Why:** The defaults favour a fast, working demo; several open the cluster wider than a real
+deployment should be. Work top-down — the first three are the widest-open doors.
+
+### Still to update
+
+| # | Item | Where | Action |
+| - | ---- | ----- | ------ |
+| 1 | **EKS API endpoint open to the internet** | `stage/stage.tfvars`, `prod/prod.tfvars` (`public_access_cidrs`); `modules/eks/main.tf` (`endpoint_public_access`) | Replace `["0.0.0.0/0"]` with your office/VPN CIDRs. Optionally make `endpoint_public_access` a variable so an env can go fully private. |
+| 2 | **Worker nodes: no launch template** → IMDSv2 not enforced + unencrypted root EBS | `modules/eks/main.tf` (`aws_eks_node_group`) | Add a launch template: `metadata_options { http_tokens = "required", http_put_response_hop_limit = 1 }` and `block_device_mappings { ebs { encrypted = true } }`. Blocks pod→node-role SSRF and encrypts node disks. |
+| 3 | **ArgoCD & Grafana published internet-facing** | `modules/argocd/main.tf` (`admin_lb_annotations`, `server.insecure`) | Uncomment/populate `aws-load-balancer-source-ranges` (lock to your IP), or keep the UIs `ClusterIP` and reach them via `port-forward`. Never run the domainless plain-HTTP internet-facing path for real. |
+| 4 | **Terraform state hardening is manual** (state holds the Grafana password + DB URLs) | `stage/backend.tf`, `prod/backend.tf` | Baseline is good (`encrypt = true` + `use_lockfile`). Enforce bucket **versioning**, **block-public-access**, and **SSE-KMS** (customer-managed key) in a bootstrap step. |
+| 5 | **No cluster access management in code** — admin implicitly belongs to whoever ran `apply` | `modules/eks/main.tf` | Add EKS **access entries** for the specific admin roles before a team shares the cluster. |
+
+### Already hardened (do not regress)
+
+- ExternalDNS IAM scoped to the specific hosted zone (`modules/eks/main.tf`); `List*` stays `*` (AWS can't scope those).
+- NetworkPolicy enforcement enabled on the VPC CNI (`enableNetworkPolicy = "true"`) with default-deny + per-flow allows in `gitops/k8s/network-policies/`.
+- KMS envelope encryption for etcd secrets (+ rotation), all control-plane log types, private-subnet nodes, per-service-account IRSA, encrypted gp3 PVCs, ECR `scan_on_push` + immutable prod tags, pinned provider versions + S3-native locking.
+
+> Accepted as-is (no action): the ALB Controller upstream IAM policy and Fluent Bit `logs:*`
+> are broad by design but scoped to this account/region.
+
+---
+
 ## Teardown
 
 **1. Destroy the infrastructure (EKS, VPC, ECR, KMS, ACM, IAM) for the env:**

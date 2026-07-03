@@ -73,7 +73,10 @@ module "eks" {
   disk_size           = var.disk_size
   node_labels         = var.node_labels
   public_access_cidrs = var.public_access_cidrs
-  tags                = local.common_tags
+  # Scope ExternalDNS's IAM to the actual zone (resolved by the dns module);
+  # empty in domainless mode, where ExternalDNS isn't deployed.
+  hosted_zone_id = var.enable_dns ? module.dns[0].zone_id : ""
+  tags           = local.common_tags
 
   depends_on = [module.vpc]
 }

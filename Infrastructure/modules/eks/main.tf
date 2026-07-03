@@ -221,6 +221,12 @@ resource "aws_eks_addon" "vpc_cni" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
   tags                        = var.tags
+
+  # Enable Kubernetes NetworkPolicy enforcement in the VPC CNI. Without this the
+  # NetworkPolicy objects in gitops/k8s/network-policies/ are silently ignored.
+  configuration_values = jsonencode({
+    enableNetworkPolicy = "true"
+  })
 }
 
 resource "aws_eks_addon" "kube_proxy" {
@@ -392,9 +398,16 @@ resource "aws_iam_role_policy" "external_dns" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["route53:ChangeResourceRecordSets"]
-        Resource = ["arn:${local.partition}:route53:::hostedzone/*"]
+        Effect = "Allow"
+        Action = ["route53:ChangeResourceRecordSets"]
+        # Scope record changes to the specific zone in domain mode; fall back to
+        # all zones only when no zone id is supplied (domainless — ExternalDNS
+        # isn't deployed then, and "hostedzone/" alone is an invalid ARN).
+        Resource = [
+          var.hosted_zone_id != "" ?
+          "arn:${local.partition}:route53:::hostedzone/${var.hosted_zone_id}" :
+          "arn:${local.partition}:route53:::hostedzone/*"
+        ]
       },
       {
         Effect   = "Allow"

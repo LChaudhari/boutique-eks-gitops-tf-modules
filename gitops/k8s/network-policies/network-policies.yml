@@ -1,0 +1,226 @@
+# ---------------------------------------------------------------------------
+# NetworkPolicies for the boutique namespace.
+#
+# Posture: default-deny INGRESS for every pod, then one allow policy per real
+# traffic flow. Egress is intentionally left open, so pod DNS (kube-dns) and
+# outbound calls keep working without extra rules.
+#
+# Requires NetworkPolicy enforcement in the VPC CNI:
+#   aws_eks_addon.vpc_cni -> configuration_values.enableNetworkPolicy = "true"
+# Without that flag these objects are accepted by the API but NOT enforced.
+#
+# Pod labels used as selectors (from the Deployment/StatefulSet templates):
+#   frontend, gateway, auth, product-service, order-service, orders,
+#   user-service, postgres, db-restore
+# Prometheus scrapes from the `monitoring` namespace (matched via the built-in
+# kubernetes.io/metadata.name label).
+# ---------------------------------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: boutique
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+# Frontend is public via the ALB Ingress — allow any source on its HTTP port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-public-to-frontend
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 3000
+---
+# Gateway is the public API via the ALB Ingress (and is also scraped by
+# Prometheus on the same port at /metrics) — allow any source on its HTTP port.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-public-to-gateway
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: gateway
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - protocol: TCP
+          port: 3001
+---
+# auth: called by gateway and order-service; scraped by Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-auth
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: auth
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - podSelector:
+            matchLabels:
+              app: order-service
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3002
+---
+# product-service: called by gateway, order-service, orders; scraped by Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-product-service
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: product-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - podSelector:
+            matchLabels:
+              app: order-service
+        - podSelector:
+            matchLabels:
+              app: orders
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3003
+---
+# order-service: called by gateway; scraped by Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-order-service
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: order-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3004
+---
+# orders: called by gateway; scraped by Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-orders
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: orders
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3005
+---
+# user-service: called by gateway; scraped by Prometheus.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-user-service
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: user-service
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: gateway
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 3006
+---
+# postgres: reached only by the DB-backed services and the one-off restore Job.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-to-postgres
+  namespace: boutique
+spec:
+  podSelector:
+    matchLabels:
+      app: postgres
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: auth
+        - podSelector:
+            matchLabels:
+              app: product-service
+        - podSelector:
+            matchLabels:
+              app: order-service
+        - podSelector:
+            matchLabels:
+              app: orders
+        - podSelector:
+            matchLabels:
+              app: user-service
+        - podSelector:
+            matchLabels:
+              app: db-restore
+      ports:
+        - protocol: TCP
+          port: 5432
