@@ -16,6 +16,19 @@ locals {
   # Otherwise stay ClusterIP (reachable via port-forward only).
   admin_service_type = (var.expose_via_ingress && !var.enable_tls) ? "LoadBalancer" : "ClusterIP"
 
+  # Internet-facing NLB annotations for the domainless LoadBalancer services.
+  # The AWS LB Controller defaults type=LoadBalancer NLBs to INTERNAL (private,
+  # unreachable from a browser), so we must set the scheme explicitly. Rendered
+  # ONLY when admin_service_type == "LoadBalancer"; empty ({}) in domain mode
+  # where the services are ClusterIP behind an ALB Ingress — so this never
+  # affects the domain path.
+  admin_lb_annotations = local.admin_service_type == "LoadBalancer" ? {
+    "service.beta.kubernetes.io/aws-load-balancer-type"   = "external"
+    "service.beta.kubernetes.io/aws-load-balancer-scheme" = "internet-facing"
+    # Optionally lock these public admin UIs to your IP (plain HTTP, no TLS):
+    # "service.beta.kubernetes.io/aws-load-balancer-source-ranges" = "<your.ip>/32"
+  } : {}
+
   # Shared ALB Ingress annotations. The Load Balancer Controller auto-discovers
   # the ACM cert by matching the Ingress host against the wildcard SAN, so no
   # certificate-arn is hard-coded here.
@@ -62,7 +75,8 @@ resource "helm_release" "argocd" {
       }
       server = {
         service = {
-          type = local.admin_service_type
+          type        = local.admin_service_type
+          annotations = local.admin_lb_annotations
         }
         ingress = {
           enabled          = local.admin_ingress_enabled
@@ -95,7 +109,7 @@ resource "helm_release" "monitoring" {
     yamlencode({
       grafana = {
         adminPassword = var.grafana_admin_password
-        service       = { type = local.admin_service_type }
+        service       = { type = local.admin_service_type, annotations = local.admin_lb_annotations }
 
         # Auto-load dashboard ConfigMaps (label grafana_dashboard: "1") from ANY
         # namespace. Needed because Kustomize applies the boutique dashboard

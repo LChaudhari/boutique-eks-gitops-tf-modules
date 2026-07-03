@@ -208,19 +208,27 @@ kubectl get pods -n boutique
 
 > **Before public access works, note the frontend/ingress wiring — it differs by mode:**
 >
+> `gitops/k8s/ingress.yml` holds **both modes in one file** — the domainless block is
+> active by default; the domain block sits next to it, commented. Switch between them with
+> the marked comment/uncomment edits (details per mode below).
+>
 > **[domainless]**
-> 1. `gitops/k8s/ingress.yml` ships host-less and HTTP-only, so the ALB answers on its own
->    AWS hostname — no edit needed. Get it after deploy with
->    `kubectl get ingress boutique -n boutique`.
+> 1. No edit needed — the file ships host-less and HTTP-only, so the ALB answers on its own
+>    AWS hostname. Get it after deploy with `kubectl get ingress boutique -n boutique`.
 > 2. The frontend image bakes `REACT_APP_API_URL=http://gateway:3001/api` (cluster-internal,
 >    unreachable from a browser). You won't know the ALB hostname until the ingress is up, so
 >    this is a two-pass process: deploy first, read the ALB hostname, then rebuild/push the
 >    frontend via CI with `REACT_APP_API_URL=http://<alb-hostname>/api` and redeploy. The app
 >    shell loads before that; its API calls just won't work until the rebuild.
 >
-> **[domain mode]**
-> 1. In `gitops/k8s/ingress.yml`, add a `host:` rule with your real domain and re-add the
->    443 listener + `ssl-redirect` (see the comments in that file).
+> **[domain mode]** (needs `enable_dns = true` so the ACM cert exists)
+> 1. In `gitops/k8s/ingress.yml`, make the **3 marked comment/uncomment edits**:
+>    - comment the `[DOMAINLESS]` `listen-ports` line;
+>    - uncomment the `[DOMAIN]` `listen-ports` + `ssl-redirect` lines;
+>    - uncomment the `host:` line and set your real domain (must match an ACM cert SAN —
+>      the apex `<domain>` or a single-level `*.<domain>`).
+>
+>    Reverse those 3 edits to return to domainless.
 > 2. Rebuild/push the frontend image with `REACT_APP_API_URL=https://<your-domain>/api` via
 >    CI so the SPA calls the public ALB over HTTPS.
 
@@ -408,6 +416,7 @@ In Grafana → **Dashboards**, a pre-built dashboard for the services is already
 | Helm: `another operation ... in progress` | Stuck/`pending` release | `helm uninstall <release> -n <ns>` → `terraform state rm ...` → `terraform apply` |
 | Ingress has no `ADDRESS` | ALB not provisioned | Check `kubectl -n kube-system logs deploy/aws-load-balancer-controller`; confirm the SA has the IRSA role annotation and subnets are tagged for ELB. |
 | **[domainless]** ArgoCD/Grafana `svc` EXTERNAL-IP stuck `<pending>` | LoadBalancer still provisioning, or public subnets not tagged | Wait 1–2 min; then check the public subnets carry `kubernetes.io/role/elb=1` and the cluster has public subnets to place the LB in. |
+| **[domainless]** ArgoCD/Grafana LB hostname has an EXTERNAL-IP but won't load in a browser (times out); `port-forward` works | The AWS LB Controller defaults a bare `type: LoadBalancer` NLB to **internal** (private IPs) | The `argocd` module sets `scheme: internet-facing` via `admin_lb_annotations`; re-run `terraform apply -var-file=<env>.tfvars`. Scheme is immutable, so the NLB is recreated with a **new** hostname — re-read it with `kubectl get svc argocd-server -n argocd` / `... kube-prometheus-stack-grafana -n monitoring`. Confirm with `nslookup <hostname>` (private `10.x` = still internal). |
 | Domain doesn't resolve to the ALB | ExternalDNS not creating records | Check `kubectl -n kube-system logs deploy/external-dns`; verify `domainFilters` matches your domain and the hosted zone exists. |
 | HTTPS cert error / no padlock | ACM cert not ISSUED or host mismatch | The cert must be `ISSUED` and cover the Ingress host (apex + `*.<domain>`). Check ACM in `ap-south-1`. |
 | Backend pods crash-looping | Database not seeded | Run the restore Job (step 8), then delete the crashed pods. |

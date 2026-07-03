@@ -82,39 +82,29 @@ aws eks update-kubeconfig --name boutique-stage --region ap-south-1
 kubectl get nodes
 ```
 
-### A.5 Edit the app Ingress for the domain
+### A.5 Switch the app Ingress to domain mode
 
-`gitops/k8s/ingress.yml` ships **domainless** (HTTP-only, no host). For domain mode, edit it
-to add HTTPS and your host rule:
+`gitops/k8s/ingress.yml` holds **both modes in one file** and ships **domainless** (HTTP-only,
+no host). To switch it to domain mode, make the **3 marked comment/uncomment edits** in that
+file:
 
-```yaml
-metadata:
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    # re-add the 443 listener + HTTP->HTTPS redirect:
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: '443'
-    alb.ingress.kubernetes.io/healthcheck-path: /
-    alb.ingress.kubernetes.io/group.name: boutique
-spec:
-  ingressClassName: alb
-  rules:
-    - host: stage.example.com      # <-- must match the ACM cert (apex or a *.<domain> SAN)
-      http:
-        paths:
-          - path: /api
-            pathType: Prefix
-            backend:
-              service: { name: gateway, port: { number: 3001 } }
-          - path: /
-            pathType: Prefix
-            backend:
-              service: { name: frontend, port: { number: 3000 } }
-```
+1. **comment** the `[DOMAINLESS]` listen-ports line:
+   ```yaml
+   # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+   ```
+2. **uncomment** the `[DOMAIN]` listen-ports + ssl-redirect lines:
+   ```yaml
+   alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+   alb.ingress.kubernetes.io/ssl-redirect: '443'
+   ```
+3. **uncomment** the `host:` line and set your real domain (must match an ACM cert SAN — the
+   apex `<domain>` or a single-level `*.<domain>`):
+   ```yaml
+   host: stage.example.com
+   ```
 
-> The ALB controller **auto-discovers** the ACM cert by matching the `host:` to a cert SAN —
-> you do **not** hard-code the certificate ARN.
+> Reverse those 3 edits to return to domainless. The ALB controller **auto-discovers** the
+> ACM cert by matching the `host:` to a cert SAN — you do **not** hard-code the certificate ARN.
 
 ### A.6 Build & push images (CI), then deploy
 
@@ -194,10 +184,12 @@ aws eks update-kubeconfig --name boutique-stage --region ap-south-1
 Skips the `dns` module (no ACM/Route53) and ExternalDNS. ArgoCD + Grafana come up as
 **HTTP `LoadBalancer` services**.
 
-### B.3 App Ingress — no edit needed
+### B.3 App Ingress — no edit needed (default)
 
-`gitops/k8s/ingress.yml` already ships host-less + HTTP-only, so the ALB answers on its own
-AWS hostname. Just `kubectl apply -k gitops/` (after images are pushed via CI).
+`gitops/k8s/ingress.yml` holds both modes in one file and ships with the **domainless** block
+active — host-less + HTTP-only — so the ALB answers on its own AWS hostname. Just
+`kubectl apply -k gitops/` (after images are pushed via CI). (If someone previously flipped it
+to domain mode, reverse the 3 comment/uncomment edits from A.5 first.)
 
 ### B.4 Find your public URLs (HTTP)
 

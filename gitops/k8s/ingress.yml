@@ -3,21 +3,37 @@ kind: Ingress
 metadata:
   name: boutique
   namespace: boutique
+  # ===========================================================================
+  # ONE file, TWO modes — switch by commenting/uncommenting the marked lines.
+  #
+  #   [DOMAINLESS]  (default, enable_dns = false): plain HTTP, no host, no cert.
+  #   [DOMAIN]      (enable_dns = true): HTTP + HTTPS(443) + redirect + host rule.
+  #
+  # To switch to DOMAIN mode make exactly 3 edits (all marked below):
+  #   1. comment the [DOMAINLESS] listen-ports line
+  #   2. uncomment the [DOMAIN] listen-ports + ssl-redirect lines
+  #   3. uncomment the `host:` line at the bottom and set your real domain
+  # Reverse those 3 edits to go back to DOMAINLESS.
+  # ===========================================================================
   annotations:
-    # Internet-facing ALB, routing to pod IPs (VPC CNI).
+    # Internet-facing ALB, routing to pod IPs (VPC CNI). Same in both modes.
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    # Domainless: listen on plain HTTP only (no ACM cert / no HTTPS redirect).
-    # To add TLS later, register a domain, re-add the 443 listener + ssl-redirect,
-    # and put your domain back as a host rule so the ACM cert is auto-discovered.
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
     alb.ingress.kubernetes.io/healthcheck-path: /
     # Group multiple ingresses onto one ALB (optional but cost-efficient).
     alb.ingress.kubernetes.io/group.name: boutique
+
+    # ── Listeners: pick ONE block ──────────────────────────────────────────
+    # [DOMAINLESS] plain HTTP only (no ACM cert needed):
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+
+    # [DOMAIN] HTTP + HTTPS with HTTP->HTTPS redirect (needs enable_dns=true so
+    # the ACM cert exists; the ALB auto-discovers it by matching the host: SAN):
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'
 spec:
   ingressClassName: alb
   rules:
-    # No host rule: the ALB answers on its own AWS-generated hostname.
     - http:
         paths:
           # More specific path first: API traffic to the gateway.
@@ -36,3 +52,10 @@ spec:
                 name: frontend
                 port:
                   number: 3000
+      # ── Host: pick ONE ─────────────────────────────────────────────────────
+      # [DOMAINLESS] (default): no host — the ALB answers on its own AWS hostname.
+      
+      # [DOMAIN]: uncomment and set your real domain (must match an ACM cert SAN,
+      # i.e. the apex <domain> or a single-level *.<domain>). ExternalDNS then
+      # creates the Route53 record for it automatically.
+      # host: shop.example.com
