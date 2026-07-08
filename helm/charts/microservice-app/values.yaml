@@ -89,6 +89,25 @@ serviceMonitor:
   path: /metrics
   portName: http
 
+# ---- NetworkPolicy (one baseline for ALL pods in the app namespace) ----------
+# Renders a single policy with podSelector: {} — so it applies to every service
+# and the DB. Default-deny Ingress + allow-list below. Egress stays open unless
+# restrictEgress: true.
+# REQUIRES a NetworkPolicy-enforcing CNI. On EKS, enable it on the vpc-cni add-on
+# (configuration_values: enableNetworkPolicy=true) or the object is silently ignored.
+networkPolicy:
+  enabled: false
+  allowIntraNamespace: true      # pods in this namespace can reach each other + the DB
+  allowMonitoring: true          # let Prometheus (monitoring ns) scrape metrics
+  monitoringNamespace: monitoring
+  allowIngressCidrs: []          # VPC CIDR(s) so the ALB (target-type: ip) can reach pods
+  extraIngress: []               # verbatim NetworkPolicyIngressRule entries appended as-is
+  # Egress is unrestricted unless you turn this on:
+  restrictEgress: false
+  allowDnsEgress: true           # CoreDNS (kube-system:53) — required when restrictEgress
+  allowEgressCidrs: []           # e.g. ["0.0.0.0/0"] or narrow to RDS/VPC/AWS ranges
+  extraEgress: []                # verbatim NetworkPolicyEgressRule entries appended as-is
+
 # ---- Database ----------------------------------------------------------------
 database:
   enabled: false

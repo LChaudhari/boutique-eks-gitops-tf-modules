@@ -1,0 +1,83 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $ns := include "app.namespace" . -}}
+{{- $np := .Values.networkPolicy -}}
+# One namespace-wide baseline policy for EVERY pod in the app namespace
+# (podSelector: {} selects all pods, so a single object covers all services + DB).
+# Model: default-deny Ingress, then explicit allow-list below. Egress is left
+# unrestricted unless networkPolicy.restrictEgress=true.
+#
+# NOTE: on EKS this is only ENFORCED when the VPC CNI network-policy feature is on
+# (vpc-cni add-on configuration_values enableNetworkPolicy=true). Without a
+# policy-enforcing CNI the object is created but silently ignored.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "app.name" . }}-baseline
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    {{- if $np.restrictEgress }}
+    - Egress
+    {{- end }}
+  ingress:
+    {{- if $np.allowIntraNamespace | default true }}
+    # 1. Pods in this namespace may talk to each other (service->service, app->DB).
+    - from:
+        - podSelector: {}
+    {{- end }}
+    {{- if $np.allowMonitoring | default true }}
+    # 2. Prometheus (in the monitoring namespace) may scrape pod metrics.
+    #    Uses the immutable kubernetes.io/metadata.name label present on every namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $np.monitoringNamespace | default "monitoring" }}
+    {{- end }}
+    {{- with $np.allowIngressCidrs }}
+    # 3. The ALB reaches pods directly by IP (target-type: ip) from inside the VPC,
+    #    so allow the VPC CIDR(s). Without this, ALB->gateway/frontend traffic is dropped.
+    - from:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- with $np.extraIngress }}
+    # 4. Verbatim extra ingress rules from values.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if $np.restrictEgress }}
+  egress:
+    {{- if $np.allowDnsEgress | default true }}
+    # DNS to CoreDNS (kube-system:53) — required or all name resolution breaks.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- end }}
+    {{- if $np.allowIntraNamespace | default true }}
+    # Intra-namespace egress (service->service, app->DB).
+    - to:
+        - podSelector: {}
+    {{- end }}
+    {{- with $np.allowEgressCidrs }}
+    # External egress by CIDR (RDS, AWS Secrets Manager, ECR, internet). NetworkPolicy
+    # can't match AWS APIs by name, so widen this to what your services actually need.
+    - to:
+        {{- range . }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- with $np.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- end }}
+{{- end }}

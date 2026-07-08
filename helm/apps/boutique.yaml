@@ -148,9 +148,24 @@ serviceMonitor:
   path: /metrics
   portName: http
 
+# One baseline NetworkPolicy for every pod in the boutique namespace: default-deny
+# ingress, then allow intra-namespace (service<->service, app->DB), Prometheus
+# scraping, and the ALB. Egress stays open (services reach AWS SM/ECR/DB freely).
+# NOTE: only enforced if the vpc-cni add-on has network policy enabled (Terraform).
+networkPolicy:
+  enabled: true
+  allowIntraNamespace: true
+  allowMonitoring: true
+  monitoringNamespace: monitoring
+  # ALB uses target-type: ip, so it hits pod IPs from within the VPC — allow the VPC
+  # CIDR. 10.0.0.0/8 covers both stage (10.10.0.0/16) and prod (10.20.0.0/16); narrow
+  # to your exact vpc_cidr for a tighter policy.
+  allowIngressCidrs:
+    - 10.0.0.0/8
+
 database:
   enabled: true
-  mode: in-cluster                                       # For AWS RDS change value to "external" 
+  mode: in-cluster                                       # For AWS RDS change value to "external"
   # host: boutique.abc123.us-west-2.rds.amazonaws.com    # Uncomment for AWS RDS, and set the host to your RDS endpoint
   # port: 5432                                           # Uncomment for AWS RDS, and set the port to your RDS port
 

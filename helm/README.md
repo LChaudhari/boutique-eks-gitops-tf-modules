@@ -29,6 +29,34 @@ From a single values file it produces, all driven by data:
 - **Postgres** (StatefulSet + headless Service) when `database.mode: in-cluster`,
   or **nothing** when `database.mode: external` (you point at RDS instead)
 - an optional one-time **DB seed Job** (`database.seed`)
+- a **namespace-wide NetworkPolicy** (`networkPolicy.enabled`) — one baseline for
+  every pod in the app namespace
+
+## NetworkPolicy — one baseline for every app
+
+`networkPolicy.enabled: true` renders a **single** policy with `podSelector: {}`, so
+it applies to every service and the DB in the app's namespace — that's the "common
+policy for all apps": each app that uses this chart gets the same baseline. The model
+is **default-deny ingress**, then an allow-list:
+
+| Value | Effect |
+| --- | --- |
+| `allowIntraNamespace` | pods in the namespace can reach each other + the DB |
+| `allowMonitoring` / `monitoringNamespace` | Prometheus in the monitoring namespace can scrape metrics |
+| `allowIngressCidrs` | VPC CIDR(s) so the ALB (`target-type: ip`) can reach pods |
+| `extraIngress` | verbatim extra ingress rules |
+| `restrictEgress` | also lock down egress (off by default — egress stays open) |
+| `allowDnsEgress` / `allowEgressCidrs` / `extraEgress` | egress allow-list when `restrictEgress` is on |
+
+> **Enforcement prerequisite (EKS):** NetworkPolicy is only enforced when the VPC CNI
+> network-policy feature is on. The `eks` module enables it on the `vpc-cni` add-on
+> (`configuration_values: enableNetworkPolicy=true`) — **re-run `terraform apply`** for
+> an existing cluster. Without a policy-enforcing CNI the object is created but ignored.
+
+`boutique.yaml` enables it with `allowIngressCidrs: [10.0.0.0/8]` (covers both the stage
+`10.10.0.0/16` and prod `10.20.0.0/16` VPCs; narrow it to your exact `vpc_cidr` for a
+tighter policy). To also restrict egress, set `restrictEgress: true` and list the CIDRs
+your services need (AWS Secrets Manager, ECR, RDS, …).
 
 ## Onboard a new app (the whole workflow)
 

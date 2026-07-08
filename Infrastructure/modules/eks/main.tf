@@ -221,6 +221,13 @@ resource "aws_eks_addon" "vpc_cni" {
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
   tags                        = var.tags
+
+  # Turn on the VPC CNI's built-in NetworkPolicy enforcement so Kubernetes
+  # NetworkPolicy objects (e.g. the chart's per-app baseline policy) are actually
+  # applied. Without this, policies are created but silently ignored on EKS.
+  configuration_values = jsonencode({
+    enableNetworkPolicy = "false"
+  })
 }
 
 resource "aws_eks_addon" "kube_proxy" {

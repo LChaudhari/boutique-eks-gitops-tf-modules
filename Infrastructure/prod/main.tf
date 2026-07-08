@@ -133,10 +133,28 @@ module "addons" {
 }
 
 # ---------------------------------------------------------------------------
-# ArgoCD (GitOps) + kube-prometheus-stack, exposed via ALB Ingress
+# ArgoCD (GitOps), exposed via ALB Ingress / LoadBalancer
 # ---------------------------------------------------------------------------
 module "argocd" {
   source = "../modules/argocd"
+
+  providers = {
+    kubernetes = kubernetes.eks
+    helm       = helm.eks
+  }
+
+  domain             = var.domain
+  expose_via_ingress = var.expose_admin_uis
+  enable_tls         = var.enable_dns
+
+  depends_on = [module.addons]
+}
+
+# ---------------------------------------------------------------------------
+# Monitoring: kube-prometheus-stack (Prometheus + Grafana + Alertmanager)
+# ---------------------------------------------------------------------------
+module "monitoring" {
+  source = "../modules/monitoring"
 
   providers = {
     kubernetes = kubernetes.eks

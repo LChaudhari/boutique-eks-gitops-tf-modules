@@ -25,7 +25,7 @@ output "argocd_url" {
 
 output "grafana_url" {
   description = "Grafana URL"
-  value       = module.argocd.grafana_url
+  value       = module.monitoring.grafana_url
 }
 
 output "route53_zone_id" {

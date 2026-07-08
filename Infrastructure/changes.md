@@ -44,7 +44,8 @@ Infrastructure/
     ecr/      (reworked) — variables split into variables.tf
     dns/      (new)
     addons/   (new)
-    argocd/   (reworked)
+    argocd/     (reworked) — ArgoCD only
+    monitoring/ (new) — kube-prometheus-stack, split out of argocd/
   stage/
     backend.tf  main.tf  variable.tf  output.tf  stage.tfvars
   prod/
@@ -193,23 +194,41 @@ Helm releases installed onto the cluster:
 
 ---
 
-## 9. ArgoCD + monitoring module (`modules/argocd`)
+## 9. ArgoCD (`modules/argocd`) + monitoring (`modules/monitoring`)
+
+> **Now two separate modules.** ArgoCD and the monitoring stack were originally one
+> module (`modules/argocd`); they've since been **split** so each owns its own
+> lifecycle — `modules/argocd` (ArgoCD only) and `modules/monitoring`
+> (kube-prometheus-stack). Both env roots (`stage/`, `prod/`) call them as two
+> independent module blocks. They share the same public-exposure pattern
+> (`expose_via_ingress` + `enable_tls` → ALB Ingress in domain mode, a public
+> `LoadBalancer` service domainless, else `ClusterIP`).
 
 **Before**
-- ArgoCD + kube-prometheus-stack via Helm, all `ClusterIP`.
+- ArgoCD + kube-prometheus-stack in a **single** module, via Helm, all `ClusterIP`.
 - ArgoCD `server.insecure = true` (plain HTTP, reached only by `port-forward`).
 - No persistence, no resource limits, no retention tuning.
 
 **After**
+
+`modules/argocd`:
 - **ArgoCD** exposed at `argocd.<domain>` via ALB Ingress (HTTP→HTTPS redirect, ACM cert
   auto-discovered). `server.insecure` now only affects the in-VPC ALB→pod hop; the
   user-facing endpoint is HTTPS.
+- Outputs: `argocd_namespace`, `argocd_url`.
+
+`modules/monitoring`:
 - **Grafana** exposed at `grafana.<domain>` via ALB Ingress; **gp3 persistence** (10Gi),
   resource limits, admin password via a `sensitive` variable.
 - **Prometheus**: 15d retention, **gp3 persistent volume** (20Gi), resource requests/limits.
-- `expose_via_ingress` toggle (default true) to fall back to `port-forward` if needed.
+- Grafana dashboard sidecar auto-loads `grafana_dashboard`-labelled ConfigMaps from ALL
+  namespaces (so the app's dashboard ConfigMap is picked up outside `monitoring`).
+- Outputs: `monitoring_namespace`, `grafana_url`.
+
+Common to both:
+- `expose_via_ingress` toggle (default true) to fall back to `port-forward` if needed;
+  `enable_tls` selects HTTPS-Ingress vs. domainless HTTP-`LoadBalancer`.
 - Chart versions, storage class, sizes, retention all variabilized.
-- Outputs: namespaces + `argocd_url` / `grafana_url`.
 
 > Bug fixed during validation: the ingress blocks originally used a conditional
 > (`expose ? {full} : {enabled=false}`) which Terraform rejected ("inconsistent
