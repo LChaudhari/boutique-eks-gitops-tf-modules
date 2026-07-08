@@ -1,0 +1,115 @@
+# =============================================================================
+# microservice-app — default values (also the reference/schema).
+# Deploy any app by copying helm/apps/<app>.yaml and editing DATA only.
+# You should not need to touch anything under templates/.
+# =============================================================================
+
+# Override the app name (defaults to the Helm release name).
+nameOverride: ""
+
+global:
+  # Namespace every app resource lands in (ServiceMonitor is the exception —
+  # it goes to serviceMonitor.namespace so Prometheus can find it).
+  namespace: default
+  # Container registry that fronts every service image (e.g. your ECR host).
+  registry: ""
+  # Default image tag for every service unless a service sets its own `tag`.
+  # CI bumps THIS one line (or per-service tags) to roll out a new build.
+  imageTag: latest
+
+# ---- Secret (one Opaque Secret shared by the app) ---------------------------
+secret:
+  enabled: false
+  name: ""            # defaults to "<app>-secrets"
+  stringData: {}      # KEY: value  (rendered as stringData)
+
+# ---- ExternalSecret (AWS Secrets Manager via External Secrets Operator) -----
+# Renders an ExternalSecret that syncs an external store into a K8s Secret named
+# `target.name` (defaults to the chart Secret name, so nothing else needs to
+# change). Set secret.enabled=false when using this. Requires ESO + a
+# (Cluster)SecretStore authenticated to AWS via IRSA.
+externalSecret:
+  enabled: false
+  apiVersion: external-secrets.io/v1   # use external-secrets.io/v1beta1 on older ESO
+  refreshInterval: 1h
+  secretStoreRef:
+    name: ""                           # your (Cluster)SecretStore name
+    kind: ClusterSecretStore           # or SecretStore
+  target:
+    name: ""                           # K8s Secret to create; defaults to the chart Secret name
+    creationPolicy: Owner
+  # Explicit per-key mapping (choose this OR dataFrom):
+  data: []
+  #  - secretKey: POSTGRES_PASSWORD    # key in the resulting K8s Secret
+  #    remoteRef:
+  #      key: boutique/db              # AWS Secrets Manager secret id
+  #      property: password            # JSON property within it
+  # Or pull an entire remote secret's JSON keys in one go:
+  dataFrom: []
+  #  - extract:
+  #      key: boutique/db
+
+# ---- Services (each entry => one Deployment + one Service) -------------------
+# Required per entry: name, port. Everything else is optional.
+services: []
+#  - name: gateway
+#    image: gateway          # image repo (appended to global.registry); defaults to name
+#    tag: ""                 # optional per-service tag override of global.imageTag
+#    replicas: 1
+#    port: 3001              # containerPort AND default Service port/targetPort
+#    servicePort: 3001       # optional: Service port if different from containerPort
+#    portName: http          # Service port name (ServiceMonitor scrapes this name)
+#    monitored: true         # adds label monitored:"true" so the ServiceMonitor scrapes it
+#    exposeService: true     # set false to skip the Service (Deployment only)
+#    serviceType: ClusterIP
+#    imagePullPolicy: IfNotPresent
+#    serviceAnnotations: {}  # e.g. alb.ingress.kubernetes.io/healthcheck-path: /health
+#    env:                    # plain key/value env
+#      NODE_ENV: development
+#    envFromSecret:          # env sourced from a Secret key
+#      - name: DATABASE_URL
+#        key: AUTH_DB_URL     # secretName defaults to the chart Secret
+#    resources: {}
+
+# ---- Ingress (AWS ALB) ------------------------------------------------------
+ingress:
+  enabled: false
+  name: ""              # defaults to app name
+  className: alb
+  annotations: {}
+  host: ""              # set only in domain/HTTPS mode (must match an ACM SAN)
+  rules: []             # - { path: /api, pathType: Prefix, service: gateway, port: 3001 }
+
+# ---- Prometheus ServiceMonitor ----------------------------------------------
+serviceMonitor:
+  enabled: false
+  namespace: monitoring
+  release: kube-prometheus-stack
+  interval: 15s
+  path: /metrics
+  portName: http
+
+# ---- Database ----------------------------------------------------------------
+database:
+  enabled: false
+  # in-cluster  => chart deploys a Postgres StatefulSet + headless Service.
+  # external    => chart deploys NO DB; wire `host` into your app via the Secret
+  #                (this is the switch you flip to move to AWS RDS).
+  mode: in-cluster
+  name: postgres        # in-cluster: StatefulSet/Service name AND the in-cluster DNS host
+  image: postgres:15-alpine
+  user: postgres
+  passwordSecret: ""    # Secret holding the password; defaults to the chart Secret
+  passwordKey: POSTGRES_PASSWORD
+  storage: 10Gi
+  storageClass: gp3
+  # external (RDS) — used only when mode: external
+  host: ""              # e.g. myapp.abc123.us-west-2.rds.amazonaws.com
+  port: 5432
+  # one-time seed/restore job (off by default)
+  seed:
+    enabled: false
+    argoHook: true      # run as an ArgoCD PostSync hook
+    backoffLimit: 3
+    dumpFile: ""        # path under the chart, e.g. files/db-dump.sql (loaded via .Files.Get)
+    script: ""          # shell script; has $DB_HOST, $PGUSER, PGPASSWORD; dump at /dump/dump.sql

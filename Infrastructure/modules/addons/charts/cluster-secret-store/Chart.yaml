@@ -1,0 +1,10 @@
+apiVersion: v2
+name: cluster-secret-store
+description: >-
+  Renders a single ESO ClusterSecretStore pointed at AWS Secrets Manager.
+  Kept as a local Helm chart so Terraform applies it at apply-time (after the
+  ESO CRDs exist) instead of via kubernetes_manifest (which needs the CRD at
+  plan-time and would fail on a fresh cluster).
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

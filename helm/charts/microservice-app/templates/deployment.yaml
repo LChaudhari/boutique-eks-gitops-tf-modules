@@ -1,0 +1,47 @@
+{{- $root := . -}}
+{{- $ns := include "app.namespace" . -}}
+{{- $secretName := include "app.secretName" . -}}
+{{- range .Values.services }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $ns }}
+  labels:
+    app: {{ .name }}
+spec:
+  replicas: {{ .replicas | default 1 }}
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+    spec:
+      containers:
+        - name: {{ .name }}
+          image: {{ include "app.image" (dict "svc" . "root" $root) }}
+          imagePullPolicy: {{ .imagePullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: {{ .port }}
+          {{- if or .env .envFromSecret }}
+          env:
+            {{- range $k, $v := .env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+            {{- range .envFromSecret }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName | default $secretName }}
+                  key: {{ .key }}
+            {{- end }}
+          {{- end }}
+          {{- with .resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

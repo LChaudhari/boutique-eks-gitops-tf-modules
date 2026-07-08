@@ -152,3 +152,16 @@ variable "grafana_admin_password" {
   type        = string
   sensitive   = true
 }
+
+# --- External Secrets Operator ---
+variable "enable_external_secrets" {
+  description = "Install External Secrets Operator + a ClusterSecretStore for AWS Secrets Manager"
+  type        = bool
+  default     = true
+}
+
+variable "cluster_secret_store_name" {
+  description = "Name of the ClusterSecretStore (must match secretStoreRef.name in the app values)"
+  type        = string
+  default     = "aws-secretsmanager"
+}

@@ -118,13 +118,16 @@ module "addons" {
     helm       = helm.eks
   }
 
-  cluster_name            = module.eks.cluster_name
-  region                  = var.region
-  vpc_id                  = module.vpc.vpc_id
-  alb_controller_role_arn = module.eks.alb_controller_role_arn
-  external_dns_role_arn   = module.eks.external_dns_role_arn
-  domain                  = var.domain
-  enable_external_dns     = var.enable_dns
+  cluster_name              = module.eks.cluster_name
+  region                    = var.region
+  vpc_id                    = module.vpc.vpc_id
+  alb_controller_role_arn   = module.eks.alb_controller_role_arn
+  external_dns_role_arn     = module.eks.external_dns_role_arn
+  domain                    = var.domain
+  enable_external_dns       = var.enable_dns
+  enable_external_secrets   = var.enable_external_secrets
+  external_secrets_role_arn = module.eks.external_secrets_role_arn
+  cluster_secret_store_name = var.cluster_secret_store_name
 
   depends_on = [module.eks]
 }

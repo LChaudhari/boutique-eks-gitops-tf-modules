@@ -1,0 +1,60 @@
+{{- if and .Values.database.enabled .Values.database.seed.enabled }}
+{{- $ns := include "app.namespace" . -}}
+{{- $secretName := include "app.secretName" . -}}
+{{- $dbHost := include "app.dbHost" . -}}
+{{- $dbUser := .Values.database.user | default "postgres" -}}
+---
+# One-time DB seed. Mounts a SQL dump (from a ConfigMap this chart generates) and
+# runs .Values.database.seed.script. The script gets $DB_HOST / $PGUSER / PGPASSWORD
+# in its env, so it stays app-agnostic — each app supplies its own script + dump.
+# As an ArgoCD PostSync hook it runs after the workloads sync and is re-runnable.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "app.name" . }}-db-dump
+  namespace: {{ $ns }}
+data:
+  dump.sql: |
+{{ .Files.Get .Values.database.seed.dumpFile | indent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "app.name" . }}-db-restore
+  namespace: {{ $ns }}
+  {{- if .Values.database.seed.argoHook }}
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+  {{- end }}
+spec:
+  backoffLimit: {{ .Values.database.seed.backoffLimit | default 3 }}
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: restore
+          image: {{ .Values.database.image | default "postgres:15-alpine" }}
+          env:
+            - name: DB_HOST
+              value: {{ $dbHost | quote }}
+            - name: PGUSER
+              value: {{ $dbUser | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.database.passwordSecret | default $secretName }}
+                  key: {{ .Values.database.passwordKey | default "POSTGRES_PASSWORD" }}
+          command:
+            - sh
+            - -c
+            - |
+{{ .Values.database.seed.script | indent 14 }}
+          volumeMounts:
+            - name: dump
+              mountPath: /dump
+      volumes:
+        - name: dump
+          configMap:
+            name: {{ include "app.name" . }}-db-dump
+{{- end }}

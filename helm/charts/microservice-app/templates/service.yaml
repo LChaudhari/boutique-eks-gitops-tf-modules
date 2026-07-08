@@ -1,0 +1,29 @@
+{{- $ns := include "app.namespace" . -}}
+{{- range .Values.services }}
+{{- if ne (.exposeService | default true) false }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .name }}
+  namespace: {{ $ns }}
+  labels:
+    app: {{ .name }}
+    {{- if .monitored }}
+    monitored: "true"
+    {{- end }}
+  {{- with .serviceAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .serviceType | default "ClusterIP" }}
+  selector:
+    app: {{ .name }}
+  ports:
+    - name: {{ .portName | default "http" }}
+      protocol: TCP
+      port: {{ .servicePort | default .port }}
+      targetPort: {{ .port }}
+{{- end }}
+{{- end }}

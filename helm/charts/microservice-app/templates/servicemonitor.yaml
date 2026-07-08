@@ -1,0 +1,23 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "app.name" . }}-services
+  # Lives in the monitoring namespace so kube-prometheus-stack's Prometheus
+  # (which watches that namespace) discovers it. namespaceSelector below points
+  # it back at the app namespace to scrape the workloads.
+  namespace: {{ .Values.serviceMonitor.namespace | default "monitoring" }}
+  labels:
+    release: {{ .Values.serviceMonitor.release | default "kube-prometheus-stack" }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "app.namespace" . }}
+  selector:
+    matchLabels:
+      monitored: "true"
+  endpoints:
+    - port: {{ .Values.serviceMonitor.portName | default "http" }}
+      path: {{ .Values.serviceMonitor.path | default "/metrics" }}
+      interval: {{ .Values.serviceMonitor.interval | default "15s" }}
+{{- end }}

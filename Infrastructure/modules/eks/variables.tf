@@ -89,6 +89,24 @@ variable "log_retention_days" {
   default     = 7
 }
 
+variable "external_secrets_namespace" {
+  description = "Namespace ESO runs in (used in the IRSA trust condition)"
+  type        = string
+  default     = "external-secrets"
+}
+
+variable "external_secrets_service_account" {
+  description = "ESO ServiceAccount name (used in the IRSA trust condition)"
+  type        = string
+  default     = "external-secrets"
+}
+
+variable "secrets_manager_path_prefix" {
+  description = "Secrets Manager id prefix ESO may read (scopes the IRSA policy; a trailing '*' is appended). Empty string = any secret in this account/region, so any app can have its own path. Set e.g. \"boutique/\" to restrict."
+  type        = string
+  default     = ""
+}
+
 variable "tags" {
   description = "Common tags applied to module resources"
   type        = map(string)

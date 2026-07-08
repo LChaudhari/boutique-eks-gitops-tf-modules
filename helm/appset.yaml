@@ -1,0 +1,51 @@
+# =============================================================================
+# ApplicationSet — the "any app just drops in" layer.
+#
+# The git files generator scans helm/apps/*.yaml and creates ONE ArgoCD
+# Application per file. Each app uses the SAME generic chart
+# (helm/charts/microservice-app) and its own values file. Add an app by adding
+# helm/apps/<name>.yaml and committing — ArgoCD creates & syncs it automatically.
+#
+# Apply once:  kubectl apply -f helm/appset.yaml -n argocd
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: microservice-apps
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/LChaudhari/devops-ai-aws-k8s-tf.git
+        revision: main
+        files:
+          - path: "helm/apps/*.yaml"
+  template:
+    metadata:
+      name: "{{ .appName }}"
+    spec:
+      project: default
+      # Multi-source: source #1 is the chart; source #2 (ref: values) exposes the
+      # repo so the chart can read a valueFile that lives OUTSIDE the chart dir.
+      sources:
+        - repoURL: https://github.com/LChaudhari/devops-ai-aws-k8s-tf.git
+          targetRevision: main
+          path: helm/charts/microservice-app
+          helm:
+            valueFiles:
+              - "$values/helm/apps/{{ .appName }}.yaml"
+        - repoURL: https://github.com/LChaudhari/devops-ai-aws-k8s-tf.git
+          targetRevision: main
+          ref: values
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .global.namespace }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true

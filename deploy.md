@@ -25,6 +25,7 @@ Follow the steps in order. Each section says **what** you are doing and **why**.
 3. [Provision the Infrastructure (Terraform)](#3-provision-the-infrastructure-terraform)
 4. [Connect to the Cluster](#4-connect-to-the-cluster)
 5. [Build & Push Images (CI/CD)](#5-build--push-images-cicd)
+   - [Secrets (AWS Secrets Manager)](#secrets-aws-secrets-manager)
 6. [Deploy the App Manifests](#6-deploy-the-app-manifests)
 7. [Set Up ArgoCD (GitOps)](#7-set-up-argocd-gitops)
 8. [Seed the Database](#8-seed-the-database)
@@ -161,6 +162,63 @@ kubectl get pods -n argocd # ArgoCD pods Running
    ```
 
 3. Watch the run under the repo's **Actions** tab until all images are pushed to ECR.
+
+---
+
+## Secrets (AWS Secrets Manager)
+
+**What:** Store the app's credentials in AWS Secrets Manager and let External
+Secrets Operator (ESO) sync them into the cluster as the `boutique-secrets` Secret.
+**Why:** Keeps real credentials out of Git. Terraform already installed ESO and a
+`ClusterSecretStore` named `aws-secretsmanager` (the `addons` module, toggled by
+`enable_external_secrets`); this step just creates the secret it reads.
+
+> **Which secret path are you on?** The Helm app values
+> (`helm/apps/boutique.yaml`) default to the AWS SM path — `secret.enabled: false`
+> plus an `externalSecret` block. If instead you use the plaintext
+> `secret.stringData` path (fine for a throwaway demo, not real credentials),
+> skip this section.
+
+1. **Create one JSON secret** whose keys match what the services expect. The IRSA
+   policy allows any secret in the account/region by default, so each app can own
+   its own path (`boutique/…`, `devboard/…`); set `secrets_manager_path_prefix` in
+   the eks module to restrict it. Use the **region you deployed to** — the store
+   reads AWS SM in that region (the prod tfvars use `us-west-2`):
+
+   ```bash
+   aws secretsmanager create-secret \
+     --name boutique/app-secrets \
+     --region us-west-2 \
+     --secret-string '{
+       "POSTGRES_DB": "postgres",
+       "POSTGRES_USER": "postgres",
+       "POSTGRES_PASSWORD": "choose-a-strong-password",
+       "AUTH_DB_URL": "postgresql://postgres:<pw>@boutique-postgres:5432/auth_db",
+       "PRODUCTS_DB_URL": "postgresql://postgres:<pw>@boutique-postgres:5432/products_db",
+       "ORDERS_DB_URL": "postgresql://postgres:<pw>@boutique-postgres:5432/orders_db",
+       "USERS_DB_URL": "postgresql://postgres:<pw>@boutique-postgres:5432/users_db"
+     }'
+   ```
+
+   The key names above are exactly what `helm/apps/boutique.yaml` references
+   (`envFromSecret[].key`, `passwordKey`). `dataFrom.extract` pulls **all** of them
+   into `boutique-secrets`, so you don't map them one by one.
+
+2. **Verify** the store is healthy and ESO created the Secret (after the app syncs):
+
+   ```bash
+   kubectl get clustersecretstore aws-secretsmanager   # STATUS should be Valid
+   kubectl get externalsecret -n boutique              # READY should be True
+   kubectl get secret boutique-secrets -n boutique     # created by ESO, not Git
+   ```
+
+> **Rotation:** update the value in AWS Secrets Manager; ESO re-syncs within its
+> `refreshInterval` (1h) — no redeploy. Roll the pods if they cache the old value.
+
+> **Troubleshooting:** `SecretSyncedError` / store not `Valid` usually means IRSA
+> isn't wired — check the ESO pod logs (`kubectl logs -n external-secrets
+> deploy/external-secrets`), that the SA carries the role annotation, and that the
+> secret id sits under the `boutique/` prefix the policy allows.
 
 ---
 

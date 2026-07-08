@@ -79,24 +79,24 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Update image tags in k8s manifests
+      - name: Bump Helm image tag
         run: |
           NEW_TAG=${{ github.sha }}
+          VALUES=helm/apps/boutique.yaml
 
-          # Registry host (account + region) is owned by gitops/kustomization.yml
-          # (single ecr-config literal), so CI only rewrites the ":tag" here and
-          # stays agnostic to account/region. Matches ".../<service>:<anything>".
-          for SERVICE in auth gateway orders order-service product-service user-service; do
-            MANIFEST="gitops/k8s/backend/${SERVICE}.yml"
-            sed -i -E "s|(image: .*/${SERVICE}:).*|\1${NEW_TAG}|g" "$MANIFEST"
-          done
+          # All service images share one tag via global.imageTag in the app's
+          # Helm values; the registry host (account + region) lives in
+          # global.registry. So CI only bumps the tag and stays account/region
+          # agnostic. Targets the single 2-space-indented "imageTag:" line.
+          sed -i -E "s|^(  imageTag:).*|\1 ${NEW_TAG}|" "$VALUES"
 
-          sed -i -E "s|(image: .*/frontend:).*|\1${NEW_TAG}|g" gitops/k8s/frontend/deployment.yml
+          echo "Updated imageTag in ${VALUES}:"
+          grep -nE '^  imageTag:' "$VALUES"
 
-      - name: Commit and push updated manifests
+      - name: Commit and push updated values
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add gitops/k8s/
-          git diff --staged --quiet || git commit -m "ci: update image tags to ${{ github.sha }}"
+          git add helm/apps/boutique.yaml
+          git diff --staged --quiet || git commit -m "ci: bump Helm imageTag to ${{ github.sha }}"
           git push

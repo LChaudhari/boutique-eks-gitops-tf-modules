@@ -1,0 +1,11 @@
+apiVersion: v2
+name: microservice-app
+description: >-
+  Generic, values-driven chart for a set of microservices behind an ALB Ingress,
+  with optional in-cluster Postgres (or external RDS), a Prometheus ServiceMonitor,
+  and a one-time DB seed Job. Deploy any app by writing a values file only —
+  the templates never change.
+type: application
+version: 0.1.0
+# appVersion is intentionally generic; per-app image tags come from values.
+appVersion: "1.0.0"

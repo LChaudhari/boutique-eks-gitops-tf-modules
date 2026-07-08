@@ -1,0 +1,199 @@
+# =============================================================================
+# boutique — app instance of the generic microservice-app chart.
+# This file is DATA ONLY. To onboard a new app, copy it and change these values.
+# The ApplicationSet turns every helm/apps/*.yaml into one ArgoCD Application.
+# =============================================================================
+appName: boutique
+
+global:
+  namespace: boutique
+  # Single source of truth for the ECR host (account + region). CI bumps imageTag.
+  registry: 664418958448.dkr.ecr.us-west-2.amazonaws.com
+  imageTag: latest
+
+# Plaintext Secret is OFF — credentials come from AWS Secrets Manager (below).
+# To fall back to plaintext-in-git, set enabled: true and add stringData keys.
+secret:
+  enabled: false
+  name: boutique-secrets
+
+# --- Secrets from AWS Secrets Manager (via External Secrets Operator) ---------
+# ESO reads one AWS SM secret ("boutique/app-secrets") and creates the K8s Secret
+# "boutique-secrets" from its JSON keys, so the services/DB read it unchanged.
+# Requires the ESO add-on + ClusterSecretStore that Terraform now provisions
+# (Infrastructure addons module; store name = aws-secretsmanager).
+externalSecret:
+  enabled: true
+  secretStoreRef:
+    name: aws-secretsmanager       # matches cluster_secret_store_name in Terraform
+    kind: ClusterSecretStore
+  target:
+    name: boutique-secrets         # same name the services/DB reference
+  dataFrom:
+    - extract:
+        key: boutique/app-secrets  # AWS SM secret id holding all the keys as JSON
+  # ...or map keys explicitly instead of dataFrom:
+  # data:
+  #   - secretKey: POSTGRES_PASSWORD
+  #     remoteRef:
+  #       key: boutique/db
+  #       property: password
+
+services:
+  - name: gateway
+    port: 3001
+    monitored: true
+    serviceAnnotations:
+      # Gateway "/" returns 404; point the ALB target-group health check at /health.
+      alb.ingress.kubernetes.io/healthcheck-path: /health
+    env:
+      NODE_ENV: development
+      PORT: "3001"
+      AUTH_SERVICE_URL: http://auth:3002
+      PRODUCTS_SERVICE_URL: http://product-service:3003
+      ORDER_SERVICE_URL: http://order-service:3004
+      ORDERS_SERVICE_URL: http://orders:3005
+      USERS_SERVICE_URL: http://user-service:3006
+
+  - name: auth
+    port: 3002
+    monitored: true
+    env:
+      NODE_ENV: development
+      PORT: "3002"
+    envFromSecret:
+      - name: DATABASE_URL
+        key: AUTH_DB_URL
+
+  - name: product-service
+    port: 3003
+    monitored: true
+    env:
+      NODE_ENV: development
+      PORT: "3003"
+    envFromSecret:
+      - name: DATABASE_URL
+        key: PRODUCTS_DB_URL
+
+  - name: order-service
+    port: 3004
+    monitored: true
+    env:
+      NODE_ENV: development
+      PORT: "3004"
+      AUTH_SERVICE_URL: http://auth:3002
+      PRODUCT_SERVICE_URL: http://product-service:3003
+    envFromSecret:
+      - name: DATABASE_URL
+        key: ORDERS_DB_URL
+
+  - name: orders
+    port: 3005
+    monitored: true
+    env:
+      NODE_ENV: development
+      PORT: "3005"
+      PRODUCTS_SERVICE_URL: http://product-service:3003
+    envFromSecret:
+      - name: DATABASE_URL
+        key: ORDERS_DB_URL
+
+  - name: user-service
+    port: 3006
+    monitored: true
+    env:
+      NODE_ENV: development
+      PORT: "3006"
+    envFromSecret:
+      - name: DATABASE_URL
+        key: USERS_DB_URL
+
+  - name: frontend
+    port: 3000
+    monitored: false
+    env:
+      # Cluster-internal default; rebuild with the public ALB/domain URL for browsers.
+      REACT_APP_API_URL: http://gateway:3001/api
+
+ingress:
+  enabled: true
+  name: boutique
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /
+    alb.ingress.kubernetes.io/group.name: boutique
+    # [DOMAINLESS] plain HTTP. For domain mode, swap for:
+    #   '[{"HTTP":80},{"HTTPS":443}]' + ssl-redirect: '443' + set host below.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'                  # For domainless mode, comment it
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'  #Uncomment for domain mode
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'                          #Uncomment for domain mode
+  host: ""                                                                   # Add your domain here for domain mode, e.g. boutique.example.com
+  rules:
+    - path: /api
+      pathType: Prefix
+      service: gateway
+      port: 3001
+    - path: /
+      pathType: Prefix
+      service: frontend
+      port: 3000
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  release: kube-prometheus-stack
+  interval: 15s
+  path: /metrics
+  portName: http
+
+database:
+  enabled: true
+  mode: in-cluster                                       # For AWS RDS change value to "external" 
+  # host: boutique.abc123.us-west-2.rds.amazonaws.com    # Uncomment for AWS RDS, and set the host to your RDS endpoint
+  # port: 5432                                           # Uncomment for AWS RDS, and set the port to your RDS port
+
+  # AWS Secrets Manager: the chart reads a K8s Secret, not AWS SM directly.
+  # Sync AWS SM -> a K8s Secret with External Secrets Operator (IRSA), then set
+  # secret.enabled=false above and point passwordSecret at that Secret's name:
+  # passwordSecret: boutique-db     # <-- the ESO-created Secret (field is passwordSecret, NOT secretName)
+  # passwordKey: POSTGRES_PASSWORD  # <-- the key inside that Secret
+    
+  name: boutique-postgres
+  image: postgres:15-alpine
+  user: postgres
+  passwordSecret: boutique-secrets
+  passwordKey: POSTGRES_PASSWORD
+  storage: 10Gi
+  storageClass: gp3
+  seed:
+    # Initial data load. Keep disabled if you prefer the standalone restore Job
+    # in gitops/k8s/database/restore-job.yml. Enable to let ArgoCD run it as a
+    # PostSync hook (requires files/db-dump.sql present in the chart).
+    enabled: false
+
+# =============================================================================
+# ALTERNATIVE: AWS RDS Postgres (managed) instead of the in-cluster DB above.
+# HOW TO SWITCH:
+#   1. Comment out the entire in-cluster `database:` block above (lines ~151-174).
+#   2. Uncomment this block.
+# In external mode the chart deploys NO StatefulSet/PVC — so the postgres image,
+# storage, storageClass and `name` are unused and intentionally dropped here; it
+# simply points the app at your RDS endpoint.
+#
+# IMPORTANT: the services connect via the *_DB_URL values in your AWS SM secret
+# (boutique/app-secrets), so those URLs must use the RDS host, e.g.
+#   AUTH_DB_URL: postgresql://<user>:<pw>@boutique.abc123.us-west-2.rds.amazonaws.com:5432/auth_db
+# The fields below are used by the (optional) seed Job and as documentation.
+# =============================================================================
+# database:
+#   enabled: true
+#   mode: external                                     # RDS = external (no in-cluster DB is rendered)
+#   host: boutique.abc123.us-west-2.rds.amazonaws.com  # your RDS endpoint (writer instance)
+#   port: 5432                                         # your RDS port
+#   user: postgres                                     # RDS master/app user
+#   passwordSecret: boutique-secrets                   # K8s Secret (synced by ESO) holding the RDS password
+#   passwordKey: POSTGRES_PASSWORD                     # key inside that Secret
+#   seed:
+#     enabled: false                                   # set true only to load an initial dump into RDS

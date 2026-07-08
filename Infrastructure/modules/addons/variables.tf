@@ -57,3 +57,40 @@ variable "create_gp3_storage_class" {
   type        = bool
   default     = true
 }
+
+# --- External Secrets Operator ---
+variable "enable_external_secrets" {
+  description = "Install External Secrets Operator + a ClusterSecretStore for AWS Secrets Manager"
+  type        = bool
+  default     = true
+}
+
+variable "external_secrets_role_arn" {
+  description = "IRSA role ARN for External Secrets Operator (from the eks module)"
+  type        = string
+  default     = ""
+}
+
+variable "external_secrets_namespace" {
+  description = "Namespace to install ESO into"
+  type        = string
+  default     = "external-secrets"
+}
+
+variable "external_secrets_service_account" {
+  description = "ESO ServiceAccount name (annotated with the IRSA role)"
+  type        = string
+  default     = "external-secrets"
+}
+
+variable "external_secrets_chart_version" {
+  description = "Helm chart version for external-secrets"
+  type        = string
+  default     = "0.10.5"
+}
+
+variable "cluster_secret_store_name" {
+  description = "Name of the ClusterSecretStore (referenced by app values' secretStoreRef.name)"
+  type        = string
+  default     = "aws-secretsmanager"
+}

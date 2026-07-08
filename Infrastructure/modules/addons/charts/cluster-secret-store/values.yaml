@@ -1,0 +1,7 @@
+# Set by the addons module via the helm_release `set` blocks.
+name: aws-secretsmanager
+region: ""
+apiVersion: external-secrets.io/v1
+serviceAccount:
+  name: external-secrets
+  namespace: external-secrets

@@ -69,6 +69,66 @@ resource "helm_release" "external_dns" {
 }
 
 # ---------------------------------------------------------------------------
+# External Secrets Operator — syncs AWS Secrets Manager into K8s Secrets.
+# ---------------------------------------------------------------------------
+resource "helm_release" "external_secrets" {
+  count = var.enable_external_secrets ? 1 : 0
+
+  name             = "external-secrets"
+  namespace        = var.external_secrets_namespace
+  create_namespace = true
+  repository       = "https://charts.external-secrets.io"
+  chart            = "external-secrets"
+  version          = var.external_secrets_chart_version
+
+  values = [
+    yamlencode({
+      installCRDs = true
+
+      serviceAccount = {
+        create = true
+        name   = var.external_secrets_service_account
+        annotations = {
+          "eks.amazonaws.com/role-arn" = var.external_secrets_role_arn
+        }
+      }
+    })
+  ]
+}
+
+# ClusterSecretStore pointed at AWS Secrets Manager. Applied as a local Helm
+# chart so it lands after the ESO CRDs exist (a kubernetes_manifest would need
+# the CRD present at plan-time and fail on a fresh cluster).
+resource "helm_release" "cluster_secret_store" {
+  count = var.enable_external_secrets ? 1 : 0
+
+  name      = "cluster-secret-store"
+  namespace = var.external_secrets_namespace
+  chart     = "${path.module}/charts/cluster-secret-store"
+
+  set = [
+    {
+      name  = "name"
+      value = var.cluster_secret_store_name
+    },
+    {
+      name  = "region"
+      value = var.region
+    },
+    {
+      name  = "serviceAccount.name"
+      value = var.external_secrets_service_account
+    },
+    {
+      name  = "serviceAccount.namespace"
+      value = var.external_secrets_namespace
+    },
+  ]
+
+  depends_on = [helm_release.external_secrets]
+}
+
+# ---------------------------------------------------------------------------
 # metrics-server — powers `kubectl top` and the Horizontal Pod Autoscaler.
 # ---------------------------------------------------------------------------
 resource "helm_release" "metrics_server" {

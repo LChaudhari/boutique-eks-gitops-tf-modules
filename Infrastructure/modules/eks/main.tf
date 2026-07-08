@@ -404,3 +404,72 @@ resource "aws_iam_role_policy" "external_dns" {
     ]
   })
 }
+
+# ---------------------------------------------------------------------------
+# IRSA: External Secrets Operator (syncs AWS Secrets Manager -> K8s Secrets).
+# Trusts ESO's ServiceAccount (external-secrets/external-secrets). Read-only on
+# Secrets Manager; KMS decrypt is limited to calls made via Secrets Manager.
+# ---------------------------------------------------------------------------
+data "aws_iam_policy_document" "external_secrets_assume_role" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.eks.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_issuer}:sub"
+      values   = ["system:serviceaccount:${var.external_secrets_namespace}:${var.external_secrets_service_account}"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_issuer}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "external_secrets_irsa" {
+  name               = "${var.cluster_name}-external-secrets-irsa"
+  assume_role_policy = data.aws_iam_policy_document.external_secrets_assume_role.json
+  tags               = var.tags
+}
+
+resource "aws_iam_role_policy" "external_secrets" {
+  name = "${var.cluster_name}-external-secrets"
+  role = aws_iam_role.external_secrets_irsa.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "ReadSecrets"
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:GetSecretValue",
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:ListSecretVersionIds",
+        ]
+        # Any secret in this account/region by default (empty prefix), so every
+        # app can own its own path (e.g. "boutique/…", "devboard/…"). Set
+        # secrets_manager_path_prefix to a prefix to restrict.
+        Resource = ["arn:${local.partition}:secretsmanager:${local.region}:${local.account_id}:secret:${var.secrets_manager_path_prefix}*"]
+      },
+      {
+        Sid      = "DecryptViaSecretsManager"
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = ["*"]
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "secretsmanager.${local.region}.amazonaws.com"
+          }
+        }
+      },
+    ]
+  })
+}

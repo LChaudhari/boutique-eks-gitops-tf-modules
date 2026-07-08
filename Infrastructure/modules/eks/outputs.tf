@@ -53,6 +53,11 @@ output "external_dns_role_arn" {
   value       = aws_iam_role.external_dns_irsa.arn
 }
 
+output "external_secrets_role_arn" {
+  description = "IRSA role ARN for External Secrets Operator"
+  value       = aws_iam_role.external_secrets_irsa.arn
+}
+
 output "secrets_kms_key_arn" {
   description = "KMS key ARN used for EKS secrets encryption"
   value       = aws_kms_key.eks_secrets.arn
