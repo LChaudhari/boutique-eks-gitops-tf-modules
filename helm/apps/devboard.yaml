@@ -1,0 +1,134 @@
+# =============================================================================
+# devboard — app instance of the generic microservice-app chart.
+# This file is DATA ONLY. The ApplicationSet turns every helm/apps/*.yaml into
+# one ArgoCD Application, so committing this file deploys DevBoard.
+#
+# Topology (mirrors the app's docker-compose):
+#   browser ─▶ frontend (vite preview :4173, proxies /api ─▶ backend)
+#                       ─▶ backend (Go/Gin :8080) ─▶ Postgres (external / RDS)
+#
+# Only the FRONTEND is behind the ALB. The frontend's built-in vite-preview proxy
+# forwards /api to the backend Service (stripping /api), so there is NO /api rule
+# at the ALB and the backend stays ClusterIP. The proxy target is baked into the
+# image as http://backend:8080, so the backend Service MUST be named "backend".
+# =============================================================================
+appName: devboard
+
+global:
+  namespace: devboard
+  # Single source of truth for the ECR host (account + region). CI bumps imageTag.
+  registry: 664418958448.dkr.ecr.us-west-2.amazonaws.com
+  imageTag: latest
+
+# Plaintext Secret is OFF — credentials come from AWS Secrets Manager (below).
+secret:
+  enabled: false
+  name: devboard-secrets
+
+# --- Secrets from AWS Secrets Manager (via External Secrets Operator) ---------
+# ESO reads one AWS SM secret ("devboard/app-secrets") and creates the K8s Secret
+# "devboard-secrets" from its JSON keys. Create it (in the region you deployed to)
+# with at least POSTGRES_URL pointing at your RDS endpoint, e.g.:
+#   aws secretsmanager create-secret --name devboard/app-secrets --region us-west-2 \
+#     --secret-string '{
+#       "POSTGRES_URL": "postgres://devboard:<pw>@<rds-endpoint>:5432/devboard?sslmode=require",
+#       "POSTGRES_PASSWORD": "<pw>"
+#     }'
+# Requires the ESO add-on + ClusterSecretStore that Terraform provisions
+# (addons module; store name = aws-secretsmanager).
+externalSecret:
+  enabled: true
+  secretStoreRef:
+    name: aws-secretsmanager       # matches cluster_secret_store_name in Terraform
+    kind: ClusterSecretStore
+  target:
+    name: devboard-secrets         # same name the backend references
+  dataFrom:
+    - extract:
+        key: devboard/app-secrets  # AWS SM secret id holding the keys as JSON
+
+services:
+  # Go/Gin API. Name is fixed to "backend" because the frontend image's proxy
+  # target (http://backend:8080) is compiled into vite.preview.config.js.
+  - name: backend
+    image: devboard-backend        # ECR repo (repo name differs from Service name)
+    port: 8080
+    monitored: false               # plain Gin app: no /metrics endpoint to scrape
+    env:
+      PORT: "8080"
+      GIN_MODE: release
+    envFromSecret:
+      # Full DSN to Postgres/RDS, sourced from the AWS SM secret above.
+      - name: POSTGRES_URL
+        key: POSTGRES_URL
+
+  # React SPA served by `vite preview` on 4173; also proxies /api -> backend.
+  # No build-time API URL: the app calls relative /api paths (see src/hooks),
+  # so this image is domain-agnostic and never needs a per-URL rebuild.
+  - name: frontend
+    image: devboard-frontend
+    port: 4173
+    monitored: false
+
+ingress:
+  enabled: true
+  name: devboard
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /          # vite preview serves the SPA at /
+    alb.ingress.kubernetes.io/group.name: devboard         # its own ALB, separate from boutique
+    # [DOMAINLESS] plain HTTP. For domain mode, swap for:
+    #   '[{"HTTP":80},{"HTTPS":443}]' + ssl-redirect: '443' + set host below.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'                  # For domainless mode
+    # alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'  # Uncomment for domain mode
+    # alb.ingress.kubernetes.io/ssl-redirect: '443'                          # Uncomment for domain mode
+  host: ""                                                                   # Add your domain here for domain mode
+  # Single rule: everything goes to the frontend, which proxies /api itself.
+  rules:
+    - path: /
+      pathType: Prefix
+      service: frontend
+      port: 4173
+
+# No metrics on this app (Gin exposes no /metrics), so no ServiceMonitor.
+serviceMonitor:
+  enabled: false
+
+# One baseline NetworkPolicy for every pod in the devboard namespace: default-deny
+# ingress, then allow intra-namespace (frontend->backend) and the ALB. Egress stays
+# open so the backend can reach RDS + AWS Secrets Manager without extra CIDRs.
+# NOTE: only enforced if the vpc-cni add-on has network policy enabled (Terraform).
+networkPolicy:
+  enabled: true
+  allowIntraNamespace: true       # frontend -> backend
+  allowMonitoring: false          # nothing to scrape on this app
+  # ALB uses target-type: ip, so it hits pod IPs from within the VPC — allow the VPC
+  # CIDR. 10.0.0.0/8 covers both stage (10.10.0.0/16) and prod (10.20.0.0/16).
+  allowIngressCidrs:
+    - 10.0.0.0/8
+  # If you later set restrictEgress: true, add your RDS/VPC CIDR to allowEgressCidrs
+  # so the backend can still reach the database.
+
+# --- Database: external (AWS RDS) --------------------------------------------
+# mode: external => the chart renders NO in-cluster Postgres. The backend connects
+# purely via POSTGRES_URL from the AWS SM secret above, so host/port here are only
+# documentation + inputs to the (disabled) seed Job.
+#
+# IMPORTANT: with external RDS, load the schema + seed yourself ONCE against the
+# RDS instance (the app's init/postgres/01_schema.sql then 02_seed.sql), e.g.:
+#   psql "postgres://devboard:<pw>@<rds-endpoint>:5432/devboard?sslmode=require" \
+#     -f devboard-app-with-docker-ai/init/postgres/01_schema.sql \
+#     -f devboard-app-with-docker-ai/init/postgres/02_seed.sql
+# The backend's queries 404 until the tables exist.
+database:
+  enabled: true
+  mode: external
+  host: your-devboard.abc123.us-west-2.rds.amazonaws.com   # informational; real endpoint lives in POSTGRES_URL
+  port: 5432
+  user: devboard
+  passwordSecret: devboard-secrets     # ESO-synced Secret (used only by the seed Job)
+  passwordKey: POSTGRES_PASSWORD
+  seed:
+    enabled: false                     # load schema/seed into RDS out-of-band (see note above)

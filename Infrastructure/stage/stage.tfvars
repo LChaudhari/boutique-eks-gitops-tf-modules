@@ -46,6 +46,9 @@ repositories = [
   "orders",
   "product-service",
   "user-service",
+  # devboard app
+  "devboard-backend",
+  "devboard-frontend",
 ]
 ecr_image_tag_mutability = "MUTABLE"
 ecr_force_delete         = true
